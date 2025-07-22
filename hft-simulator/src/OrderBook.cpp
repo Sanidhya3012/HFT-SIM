@@ -1,18 +1,21 @@
 #include "OrderBook.h"
 #include <iostream>
+#include <random>
+#include <chrono>
 
 OrderBook::OrderBook() {}
 
 // Add a new order to the book and update lookup
 void OrderBook::addOrder(const Order& order) {
-    auto& book = (order.getSide() == Order::Side::BUY) ? buy_orders_ : sell_orders_;
-    book[order.getPrice()].push_back(order);
-    auto it = --book[order.getPrice()].end();
-    order_lookup_[order.getOrderID()] = {order.getSide(), {order.getPrice(), it}};
-    // Update price priority queues for O(1) best price lookup
     if (order.getSide() == Order::Side::BUY) {
+        buy_orders_[order.getPrice()].push_back(order);
+        std::list<Order>::iterator it = --buy_orders_[order.getPrice()].end();
+        order_lookup_[order.getOrderID()] = std::make_pair(order.getSide(), std::make_pair(order.getPrice(), it));
         buy_price_pq_.push(order.getPrice());
     } else {
+        sell_orders_[order.getPrice()].push_back(order);
+        std::list<Order>::iterator it = --sell_orders_[order.getPrice()].end();
+        order_lookup_[order.getOrderID()] = std::make_pair(order.getSide(), std::make_pair(order.getPrice(), it));
         sell_price_pq_.push(order.getPrice());
     }
 }
@@ -35,8 +38,8 @@ void OrderBook::matchOrders() {
             continue;
         }
         if (best_buy < best_sell) break; // No match possible
-        auto& buy_list = buy_orders_[best_buy];
-        auto& sell_list = sell_orders_[best_sell];
+        std::list<Order>& buy_list = buy_orders_[best_buy];
+        std::list<Order>& sell_list = sell_orders_[best_sell];
         Order& buy_order = buy_list.front();
         Order& sell_order = sell_list.front();
         int trade_qty = std::min(buy_order.getQuantity(), sell_order.getQuantity());
@@ -44,7 +47,12 @@ void OrderBook::matchOrders() {
         std::cout << "Trade: BuyOrder " << buy_order.getOrderID() << " & SellOrder " << sell_order.getOrderID()
                   << ", Qty: " << trade_qty << ", Price: " << trade_price << std::endl;
         if (trade_logger_) {
-            Trade trade{buy_order.getOrderID(), sell_order.getOrderID(), trade_price, trade_qty, static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count())};
+            Trade trade;
+            trade.buy_order_id = buy_order.getOrderID();
+            trade.sell_order_id = sell_order.getOrderID();
+            trade.price = trade_price;
+            trade.quantity = trade_qty;
+            trade.timestamp = static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
             trade_logger_->logTrade(trade);
         }
         buy_order.setQuantity(buy_order.getQuantity() - trade_qty);
@@ -60,7 +68,7 @@ void OrderBook::matchOrders() {
 
 // Cancel an order by ID
 bool OrderBook::cancelOrder(int order_id) {
-    auto it = order_lookup_.find(order_id);
+    std::unordered_map<int, std::pair<Order::Side, std::pair<double, std::list<Order>::iterator> > >::iterator it = order_lookup_.find(order_id);
     if (it == order_lookup_.end()) return false;
     removeOrder(order_id);
     return true;
@@ -68,18 +76,28 @@ bool OrderBook::cancelOrder(int order_id) {
 
 // Remove order from book and lookup
 void OrderBook::removeOrder(int order_id) {
-    auto it = order_lookup_.find(order_id);
+    std::unordered_map<int, std::pair<Order::Side, std::pair<double, std::list<Order>::iterator> > >::iterator it = order_lookup_.find(order_id);
     if (it == order_lookup_.end()) return;
     Order::Side side = it->second.first;
     double price = it->second.second.first;
-    auto list_it = it->second.second.second;
-    auto& book = (side == Order::Side::BUY) ? buy_orders_ : sell_orders_;
-    auto price_it = book.find(price);
-    if (price_it != book.end()) {
-        price_it->second.erase(list_it);
-        if (price_it->second.empty()) {
-            book.erase(price_it);
-            // Note: Priority queues may contain stale prices; we skip them in matchOrders
+    std::list<Order>::iterator list_it = it->second.second.second;
+    if (side == Order::Side::BUY) {
+        std::map<double, std::list<Order>, std::greater<double> >::iterator price_it = buy_orders_.find(price);
+        if (price_it != buy_orders_.end()) {
+            price_it->second.erase(list_it);
+            if (price_it->second.empty()) {
+                buy_orders_.erase(price_it);
+                // Note: Priority queues may contain stale prices; we skip them in matchOrders
+            }
+        }
+    } else {
+        std::map<double, std::list<Order> >::iterator price_it = sell_orders_.find(price);
+        if (price_it != sell_orders_.end()) {
+            price_it->second.erase(list_it);
+            if (price_it->second.empty()) {
+                sell_orders_.erase(price_it);
+                // Note: Priority queues may contain stale prices; we skip them in matchOrders
+            }
         }
     }
     order_lookup_.erase(it);
@@ -88,9 +106,11 @@ void OrderBook::removeOrder(int order_id) {
 // Get all current buy orders
 std::vector<Order> OrderBook::getBuyOrders() const {
     std::vector<Order> result;
-    for (const auto& [price, orders] : buy_orders_) {
-        for (const auto& order : orders) {
-            result.push_back(order);
+    for (std::map<double, std::list<Order>, std::greater<double> >::const_iterator it = buy_orders_.begin(); it != buy_orders_.end(); ++it) {
+        double price = it->first;
+        const std::list<Order>& orders = it->second;
+        for (std::list<Order>::const_iterator oit = orders.begin(); oit != orders.end(); ++oit) {
+            result.push_back(*oit);
         }
     }
     return result;
@@ -99,9 +119,11 @@ std::vector<Order> OrderBook::getBuyOrders() const {
 // Get all current sell orders
 std::vector<Order> OrderBook::getSellOrders() const {
     std::vector<Order> result;
-    for (const auto& [price, orders] : sell_orders_) {
-        for (const auto& order : orders) {
-            result.push_back(order);
+    for (std::map<double, std::list<Order> >::const_iterator it = sell_orders_.begin(); it != sell_orders_.end(); ++it) {
+        double price = it->first;
+        const std::list<Order>& orders = it->second;
+        for (std::list<Order>::const_iterator oit = orders.begin(); oit != orders.end(); ++oit) {
+            result.push_back(*oit);
         }
     }
     return result;
