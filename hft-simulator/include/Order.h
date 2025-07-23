@@ -4,30 +4,37 @@
 #include <string>
 #include <cstdint>
 
-// Represents a market order (buy or sell) with price, quantity, and timestamp
 class Order {
 public:
     enum class Side { BUY, SELL };
+    enum class OrderType { LIMIT, MARKET, STOP };
 
-    // Construct an order with all fields
-    Order(int order_id, Side side, double price, int quantity, std::uint64_t timestamp);
+    // Constructor for limit/market orders
+    Order(int order_id, Side side, double price, int quantity, std::uint64_t timestamp, OrderType type = OrderType::LIMIT);
+    // Constructor for stop orders
+    Order(int order_id, Side side, double price, int quantity, std::uint64_t timestamp, double stop_price);
 
-    // Accessors (getters)
+    // Accessors
     int getOrderID() const;
     Side getSide() const;
     double getPrice() const;
     int getQuantity() const;
     std::uint64_t getTimestamp() const;
+    OrderType getOrderType() const;
+    double getStopPrice() const;
 
-    // Mutators (setters)
+    // Mutators
     void setOrderID(int order_id);
     void setSide(Side side);
     void setPrice(double price);
     void setQuantity(int quantity);
     void setTimestamp(std::uint64_t timestamp);
+    void setOrderType(OrderType type);
+    void setStopPrice(double stop_price);
 
-    // Convert Side enum to string ("BUY" or "SELL")
+    // Utility
     static std::string sideToString(Side side);
+    static std::string typeToString(OrderType type);
 
 private:
     int order_id_;
@@ -35,6 +42,8 @@ private:
     double price_;
     int quantity_;
     std::uint64_t timestamp_;
+    OrderType type_;
+    double stop_price_; // Only used for STOP orders
 };
 
 #endif // ORDER_H 

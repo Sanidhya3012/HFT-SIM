@@ -9,25 +9,27 @@
 #include <vector>
 #include <queue>
 
-// OrderBook manages buy and sell orders, supports add, match, and cancel operations.
+// OrderBook manages buy and sell orders, supports add, match, cancel, market, and stop operations.
 class OrderBook {
 public:
     OrderBook();
 
-    // Add a new order to the book
+    // Add a new order to the book (limit or market)
     void addOrder(const Order& order);
-
+    // Add a market order (executes immediately at best price)
+    void addMarketOrder(const Order& order);
+    // Add a stop order (activates when stop price is reached)
+    void addStopOrder(const Order& order);
     // Attempt to match orders (buy vs sell). Matches best prices and logs trades if logger is set.
     void matchOrders();
-
+    // Check and activate stop orders if price is reached
+    void checkStopOrders();
     // Cancel an order by ID. Returns true if canceled, false if not found.
     bool cancelOrder(int order_id);
-
     // Get all current buy orders (for inspection/testing)
     std::vector<Order> getBuyOrders() const;
     // Get all current sell orders (for inspection/testing)
     std::vector<Order> getSellOrders() const;
-
     // Set the trade logger for recording matched trades
     void setTradeLogger(TradeLogger* logger);
 
@@ -45,6 +47,10 @@ private:
     // These are updated on add/cancel for O(1) best price lookup
     std::priority_queue<double> buy_price_pq_; // max-heap for buy prices
     std::priority_queue<double, std::vector<double>, std::greater<double>> sell_price_pq_; // min-heap for sell prices
+
+    // Containers for pending stop orders
+    std::vector<Order> stop_buy_orders_;
+    std::vector<Order> stop_sell_orders_;
 
     // Helper to remove order from book and lookup
     void removeOrder(int order_id);
